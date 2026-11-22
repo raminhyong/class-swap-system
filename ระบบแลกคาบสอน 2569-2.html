@@ -130,7 +130,7 @@
   </div>
   <div>
     <h1>ระบบหาครูแลกคาบสอน <span style="font-size:14px; font-weight:normal; opacity:0.85; background:rgba(255,255,255,0.18); padding:3px 10px; border-radius:12px; margin-left:8px; vertical-align:middle;">ภาคเรียนที่ 2/2569</span></h1>
-    <p>เลือกครู + วันที่ไม่สะดวก ระบบจะเสนอครูที่สอนห้องเดียวกันมาสอนแทน พร้อมแจ้งว่าสอนคืนได้หรือไม่ และตรวจสอบคาบคู่ให้อัตโนมัติ</p>
+    <p>เลือกครู + วันที่ไม่สะดวก ระบบจะเสนอครูที่สอนห้องเดียวกันมาสอนแทน พร้อมแจ้งว่าสอนคืนได้หรือไม่ (คาบคู่สามารถแยกแลกคาบละคนได้)</p>
   </div>
 </header>
 
@@ -157,7 +157,7 @@
       </div>
 
       <div id="scheduleArea" style="display:none;">
-        <div class="hint">คลิกคาบที่ไม่สะดวกสอน (คาบที่มีสีคือคาบที่มีการสอนอยู่ · แถบเขียวด้านล่างคือคาบคู่)</div>
+        <div class="hint">คลิกคาบที่ไม่สะดวกสอน (คาบที่มีสีคือคาบที่มีการสอนอยู่ · คาบคู่สามารถคลิกเลือกแลกแยกทีละคาบได้)</div>
         <div class="sched-grid" id="schedGrid"></div>
       </div>
     </div>
@@ -195,9 +195,6 @@ const PERIODS = [0,1,2,3,4,5,6,7,8,9,10];
 function recordsOf(teacher){ return RECORDS.filter(function(r){ return r.t===teacher; }); }
 function findSlot(teacher, day, period){ return RECORDS.find(function(r){ return r.t===teacher && r.d===day && r.p===period; }); }
 function isBusy(teacher, day, period){ return !!findSlot(teacher, day, period); }
-function formatPeriodLabel(r){
-  return r.dp && r.gp ? ('คาบคู่ ' + r.gp.join('-')) : ('คาบ ' + r.p);
-}
 
 function findCandidates(teacher, day, period){
   const target = findSlot(teacher, day, period);
@@ -205,7 +202,6 @@ function findCandidates(teacher, day, period){
   const room = target.c;
   if(!room) return {error:"คาบนี้ไม่มีข้อมูลห้องเรียนที่ชัดเจนในตารางต้นฉบับ ระบบจับคู่ห้องไม่ได้ กรุณาพิจารณาด้วยตนเอง", target: target};
 
-  const pairedOtherPeriods = (target.dp && target.gp) ? target.gp.filter(function(p){ return p !== period; }) : [];
   const roomTeachers = new Map();
   RECORDS.forEach(function(r){
     if(r.c===room && r.t!==teacher){
@@ -223,22 +219,17 @@ function findCandidates(teacher, day, period){
         paybackOptions.push(s);
       }
     });
-    const busyPairedPeriods = pairedOtherPeriods.filter(function(op){ return isBusy(cand, day, op); });
-    const canCoverAll = pairedOtherPeriods.length > 0 ? busyPairedPeriods.length === 0 : true;
     results.push({
       candidate: cand,
       department: TEACHER_GROUP[cand] || '',
       canPayback: paybackOptions.length>0,
       paybackOptions: paybackOptions,
       normalSessions: sessions,
-      canCoverAll: canCoverAll,
-      busyPairedPeriods: busyPairedPeriods,
       daySchedule: recordsOf(cand).filter(function(r){ return r.d===day; }).sort(function(a,b){ return a.p-b.p; })
     });
   });
 
   results.sort(function(a,b){
-    if(target.dp && a.canCoverAll !== b.canCoverAll) return (b.canCoverAll - a.canCoverAll);
     return (b.canPayback - a.canPayback) || a.candidate.localeCompare(b.candidate,'th');
   });
   return {target: target, results: results};
@@ -358,7 +349,7 @@ function renderResults(){
   }
 
   const t = res.target;
-  const dpBadge = t.dp && t.gp ? ' <span class="badge amber">⚠️ คาบคู่ (คาบ '+t.gp.join('-')+')</span>' : '';
+  const dpBadge = t.dp && t.gp ? ' <span class="badge green">คาบคู่ '+t.gp.join('-')+' · แยกแลกทีละคาบได้</span>' : '';
   let html = '<div class="card">';
   html += '<div class="result-header">'
       + '<div><b>'+selTeacher+'</b> — วัน'+selDay+' คาบ '+selPeriod+' ('+t.tm+')'+dpBadge+'<br>'
@@ -375,13 +366,13 @@ function renderResults(){
   if(canReturn.length){
     html += '<div class="group-title">✅ สามารถสอนคืนได้ ('+canReturn.length+')</div>';
     canReturn.forEach(function(r){
-      html += renderCandCard(r, true, t);
+      html += renderCandCard(r, true);
     });
   }
   if(cannotReturn.length){
     html += '<div class="group-title">⚠️ สอนแทนได้ แต่สอนคืนไม่ได้ ('+cannotReturn.length+')</div>';
     cannotReturn.forEach(function(r){
-      html += renderCandCard(r, false, t);
+      html += renderCandCard(r, false);
     });
   }
 
@@ -389,21 +380,13 @@ function renderResults(){
   area.innerHTML = html;
 }
 
-function renderCandCard(r, canReturn, target){
+function renderCandCard(r, canReturn){
   let html = '<div class="cand-card '+(canReturn?'can-return':'cannot-return')+'">';
-  let dpStatusBadge = '';
-  if(target && target.dp && target.gp){
-    if(r.canCoverAll){
-      dpStatusBadge = '<span class="badge green">ว่างครบทั้งคาบคู่ '+target.gp.join('-')+'</span>';
-    } else {
-      dpStatusBadge = '<span class="badge amber">ว่างเฉพาะคาบ '+selPeriod+' (ไม่ว่างคาบ '+r.busyPairedPeriods.join(',')+')</span>';
-    }
-  }
-  html += '<div class="cand-head"><div><span class="cand-name">'+r.candidate+'</span><span class="cand-dept">('+r.department+')</span></div>'+dpStatusBadge+'</div>';
-  html += '<div class="cand-sub">ปกติสอนห้องนี้: '+r.normalSessions.map(function(s){ return 'วัน'+s.d+' '+formatPeriodLabel(s)+' ('+(s.s||'')+')'; }).join(' , ')+'</div>';
+  html += '<div class="cand-head"><div><span class="cand-name">'+r.candidate+'</span><span class="cand-dept">('+r.department+')</span></div></div>';
+  html += '<div class="cand-sub">ปกติสอนห้องนี้: '+r.normalSessions.map(function(s){ return 'วัน'+s.d+' คาบ'+s.p+' ('+(s.s||'')+')'; }).join(' , ')+'</div>';
   if(canReturn){
     html += '<div class="payback-list">สอนคืนได้ที่: '+r.paybackOptions.map(function(o){
-      return '<span>วัน'+o.d+' คาบ'+o.p+' ('+o.tm+')'+(o.dp && o.gp ? ' [คู่ '+o.gp.join('-')+']' : '')+'</span>';
+      return '<span>วัน'+o.d+' คาบ'+o.p+' ('+o.tm+')</span>';
     }).join('')+'</div>';
   } else {
     html += '<div class="payback-list"><span style="background:var(--gold-bg);color:var(--gold-text);">ไม่มีคาบว่างของครูผู้ขอ ตรงกับคาบที่ครูท่านนี้ปกติสอนห้องนี้ — สอนคืนไม่ได้</span></div>';
